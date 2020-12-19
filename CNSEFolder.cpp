@@ -57,6 +57,7 @@ HRESULT STDMETHODCALLTYPE CNSEFolder::CreateStackedIDList(PROPERTYKEY* pkey, PID
 
 HRESULT STDMETHODCALLTYPE CNSEFolder::GetStackedKey(PROPERTYKEY* key) {
 	//Item Filter From Column???
+	*key = PKEY_Null; //Set Empty (if not, you can't click column in details view mode)
 	return S_FALSE; //must S_FALSE
 }
 
