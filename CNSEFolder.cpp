@@ -12,15 +12,24 @@ HRESULT STDMETHODCALLTYPE CNSEFolder::ParseDisplayName(HWND hwndOwner, LPBC pbc,
 	//(https://docs.microsoft.com/en-us/windows/win32/shell/str-constants ,STR_PARSE_WITH_PROPERTIES ) --byungho
 	if (!pwszDisplayName || wcslen(pwszDisplayName) <= 0) {
 		if (!pbc) {
-			return E_INVALIDARG;
+			hr = E_INVALIDARG;
+			goto escapeArea;
 		}
-
+		
+		//First, try get pidl from pbc.
+		*ppidl = _GetPIDLFromPBC(pbc);
+		if (*ppidl) {
+			hr = S_OK;
+			goto escapeArea;
+		}
+		//Get displayName from pbc. (if failed to get pidl)
 		displayName = _GetDisplayNameFromPBC(pbc);
 		pwszDisplayName = displayName;
 	}
 	
-	/*......*/
-	
+	/*...Handle ParseDisplayName ...*/
+escapeArea:
+
 	if(displayName){
 		CoTaskMemFree(displayName);
 	}
@@ -155,4 +164,55 @@ escapeArea:
 	}
 
 	return displayName;
+}
+
+LPITEMIDLIST CNSEFolder::_GetPIDLFromPBC(IBindCtx* pbc) {
+	LPITEMIDLIST pidl = NULL;
+	LPITEMIDLIST temp = NULL;
+	IUnknown* pQueryResult = NULL;
+	IPropertyStore* pProp = NULL;
+	PROPVARIANT var;
+
+	if (!pbc) {
+		goto escapeArea;
+	}
+	//undocumented value
+	//According to MSDN, DBFolder use STR_PARSE_WITH_PROPERTIES value to get displayname in ParseDisplayname
+	//https://docs.microsoft.com/en-us/windows/win32/shell/str-constants
+	//but in Windows 10 (not sure in windows 7 or 8) , GetObjectParam with STR_PARSE_WITH_PROPERTIES return E_FAIL
+	//And searchfolder call GetObjectParam with undocumented key "ParseWithQueryResult" 
+	//(return value is undocumented interface IQueryResult) --byungho
+#define STR_PARSE_WITH_QUERYRESULT L"ParseWithQueryResult"
+	pbc->GetObjectParam(STR_PARSE_WITH_QUERYRESULT, &pQueryResult);
+	if (pQueryResult) {
+		pQueryResult->QueryInterface(IID_IPropertyStore, (PVOID*)&pProp);
+	}
+	else {
+		//fall back
+		pbc->GetObjectParam(STR_PARSE_WITH_PROPERTIES, (IUnknown**)&pProp);
+	}
+
+	if (pProp) {
+		//undocumented value (PKEY_DelegateIDList , {28636aa6-953d-11d2-b5d6-00c04fd918d0,32} ) 
+		//return value : (unknown pidl(s)/parent folder pidl/item pidl) --byungho
+		pProp->GetValue(PKEY_DelegateIDList, &var);
+		if (var.vt == 4113) {
+			//Get Last Pidl and copy it. (last pidl is item pidl)
+			temp = (LPITEMIDLIST)var.calpstr.pElems;
+			temp = ILFindLastID(temp);
+			pidl = ILClone(temp);
+			ILFree((LPITEMIDLIST)var.calpstr.pElems);
+		}
+	}
+
+escapeArea:
+	if (pProp) {
+		pProp->Release();
+	}
+
+	if (pQueryResult) {
+		pQueryResult->Release();
+	}
+
+	return pidl;
 }
