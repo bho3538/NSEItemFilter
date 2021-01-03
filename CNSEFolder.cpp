@@ -93,6 +93,20 @@ HRESULT STDMETHODCALLTYPE CNSEFolder::GetAutoListFlags(ULONG* flags) {
 	//unknown
 	return E_NOTIMPL;
 }
+//IObjectProvider
+HRESULT STDMETHODCALLTYPE CNSEFolder::QueryObject(REFGUID guidObject, REFIID riid, void **ppvOut) {
+	HRESULT hr = E_NOTIMPL;
+	//See CScope.h
+	if (riid == IID_IBindScopeDialog) {
+		CComObject<CScope>* pscope = NULL;
+		hr = CComObject<CScope>::CreateInstance(&pscope);
+		if (hr == S_OK) {
+			*ppvOut = pscope;
+		}
+	}
+
+	return hr;
+}
 
 //------Helper function-------
 
