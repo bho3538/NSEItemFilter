@@ -217,6 +217,19 @@ LPITEMIDLIST CNSEFolder::_GetPIDLFromPBC(IBindCtx* pbc) {
 			pidl = ILClone(temp);
 			ILFree((LPITEMIDLIST)var.calpstr.pElems);
 		}
+		
+		//set property for 'Content View Mode'
+		//Property list for display in Content View Mode (example)
+		var->vt = VT_BSTR;
+		var->bstrVal = SysAllocString(L"prop:~System.ItemNameDisplay;System.FileOwner;System.DateModified;System.Size;");
+		//use ContentViewModeForSearch not ContentViewModeForBrowse (we handle IShellFolder3::SetScope)
+		pProp->SetValue(PKEY_PropList_ContentViewModeForSearch,var); 
+		SysFreeString(var->bstrVal); //free
+		
+		var->bstrVal = SysAllocString(L"delta");
+		//use ContentViewModeForBrowse (not forsearch)
+		pProp->SetValue(PKEY_LayoutPattern_ContentViewModeForBrowse,var); 
+		SysFreeString(var->bstrVal); //free
 	}
 
 escapeArea:
