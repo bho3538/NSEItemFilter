@@ -36,6 +36,35 @@ escapeArea:
 	
 	return hr;
 }
+//for 'Group by' mode
+HRESULT STDMETHODCALLTYPE CNSEFolder::BindToObject(LPCITEMIDLIST pidl, IBindCtx* pbc, REFIID riid, void** ppvOut) {
+	/* .. */
+	HRESULT hr = E_NOINTERFACE;
+	if(riid == IID_IShellFolder || riid == IID_IShellFolder2){
+		if(!CNSEData::IsOwn(pidl)){ // check pidl signiture (own)
+			//check is ishellfolder3 groupby filter pidl
+			if(*((USHORT*)((BYTE *)(pidl + 8))) == 91164692){ //magic number from 'DBFolder' (see _VFCreateFilteredIDList())
+				//this is filter pidl
+				pidl = this->pidl; //set current NSE folder pidl (for just create instance)
+			}
+			else{
+				//invalid pidl
+				hr = E_FAIL;
+				goto escapeArea;
+			}
+		}
+		
+		//create folder instance and set value at 'ppvOut'
+		
+		hr = S_OK;
+		goto escapeArea;
+	}
+	/* .. */
+	
+	escapeArea:
+	
+	return hr;
+}
 
 
 //------IShellFolder3---------
@@ -242,4 +271,172 @@ escapeArea:
 	}
 
 	return pidl;
+}
+//for 'Group by' mode
+HRESULT VFCreateItemFilter(IPropertyStore* pQueryProp, PVOID *ppv) {
+	typedef HRESULT(__stdcall *TSHCreateFilter)(PCWSTR Name, PCWSTR InFolder, const PROPERTYKEY* PropertyKey, INT Type, ICondition *Condition, REFIID iid, PVOID *ppv);
+	HRESULT hr = E_FAIL;
+
+	TSHCreateFilter SHCreateFilter = NULL;
+	HMODULE hModule = NULL;
+	IPersistStream* pFilterCondition = NULL;
+	IStream* pFilterStream = NULL;
+
+	PROPVARIANT pv = { 0, };
+
+	LARGE_INTEGER tmp = { 0, };
+
+	if (!pQueryProp) {
+		hr = E_INVALIDARG;
+		goto escapeArea;
+	}
+
+	hModule = LoadLibraryW(L"shell32.dll");
+
+	if (!hModule) {
+		goto escapeArea;
+	}
+	//from https://www.geoffchappell.com/studies/windows/shell/shell32/api/filtercondition/create.htm
+	SHCreateFilter = (TSHCreateFilter)GetProcAddress(hModule, MAKEINTRESOURCEA(818));
+	if (!SHCreateFilter) {
+		goto escapeArea;
+	}
+
+	pQueryProp->GetValue(PKEY_Condition, &pv);
+	if (pv.vt == VT_EMPTY) {
+		goto escapeArea;
+	}
+	//dummy filter name
+	hr = SHCreateFilter(L"A - H", NULL, PKEY_ItemNameDisplay, 0, (ICondition*)pv.punkVal, IID_IFilterCondition, (PVOID*)&pFilterCondition);
+	PropVariantClear(&pv);
+
+	if (FAILED(hr)) {
+		goto escapeArea;
+	}
+
+	pFilterStream = SHCreateMemStream(NULL, 0);
+	if (!pFilterStream) {
+		hr = E_OUTOFMEMORY;
+		goto escapeArea;
+	}
+
+	hr = pFilterCondition->Save(pFilterStream, FALSE);
+	if (FAILED(hr)) {
+		goto escapeArea;
+	}
+
+	pv.vt = VT_STREAM;
+	pv.pStream = pFilterStream;
+
+	pFilterStream->Seek(tmp, STREAM_SEEK_SET, NULL);
+	pQueryProp->SetValue(PKEY_FilterInfo, &pv);
+
+	pv.vt = VT_EMPTY;
+	pv.intVal = 0;
+
+	//remove useless key 
+	pQueryProp->SetValue(PKEY_Condition, &pv);
+	pQueryProp->SetValue(PKEY_ConditionKey, &pv);
+
+	pQueryProp->Commit();
+
+	//create filtered idList
+	hr = _XCreateFilteredIDList(pQueryProp, (LPITEMIDLIST*)ppv);
+
+escapeArea:
+
+	if (pFilterCondition) {
+		pFilterCondition->Release();
+	}
+
+	if (pFilterStream) {
+		pFilterStream->Release();
+	}
+
+	return hr;
+}
+
+HRESULT _VFCreateFilteredIDList(IPropertyStore* ps, LPITEMIDLIST* ppidl) {
+	typedef struct
+	{
+		WORD cbSize;
+		WORD wOuter;  
+		WORD cbInner;
+		DWORD dwMagic;
+		WORD cbPropStore;
+		WORD cbInnerData;
+		struct { //dummy ??????
+			ULONGLONG a;
+			ULONGLONG b;
+			ULONGLONG c;
+		};
+	} CHILDITEMID;
+	
+	HRESULT hr = E_FAIL;
+	IPersistSerializedPropStorage* pps = NULL;
+	BYTE* data = NULL;
+	DWORD dataLen = 0;
+
+	UINT cbInner = 0;
+	UINT cbAlloc = 0;
+	CHILDITEMID* pidl = NULL;
+
+	if (!ps) {
+		hr = E_INVALIDARG;
+		goto escapeArea;
+	}
+
+	ps->QueryInterface(IID_IPersistSerializedPropStorage, &pps);
+	if (!pps) {
+		goto escapeArea;
+	}
+
+	hr = pps->GetPropertyStorage((SERIALIZEDPROPSTORAGE**)&data, &dataLen);
+	if (FAILED(hr)) {
+		goto escapeArea;
+	}
+
+	//create pidl like 'DBFolder'
+	//some codes from CItemIDFactory (https://docs.microsoft.com/en-us/windows/win32/api/shidfact/nl-shidfact-citemidfactory)
+	cbInner = sizeof(CHILDITEMID) - (sizeof(DELEGATEITEMID) - 1) + dataLen + 6;
+	cbAlloc =sizeof(DELEGATEITEMID) - sizeof(BYTE) + cbInner + sizeof(WORD);
+	pidl = CoTaskMemAlloc(cbAlloc + sizeof(USHORT));
+	if (!pidl) {
+		goto escapeArea;
+	}
+	
+	pidl->cbSize = cbAlloc;
+	pidl->cbInner = cbInner;
+	pidl->dwMagic = 91164692; //magic number from 'DBFolder'
+	pidl->cbPropStore = 32; //?? (not propstore len)
+	pidl->cbInnerData = 0;
+	pidl->a = 8192; // ?????
+
+	BYTE *pbData = (BYTE*)(pidl + 1);
+	pbData = pbData + sizeof(WORD);
+
+	DWORD tmp = 269; //?????
+	memcpy(pbData, &tmp, sizeof(DWORD));
+	pbData = pbData + sizeof(DWORD);
+
+	//copy serialized data
+	memcpy(pbData, data, dataLen);
+
+	//null-terminator
+	*((USHORT*)((BYTE *)(pidl + pidl->cbSize))) = 0;
+
+	*ppidl = (LPITEMIDLIST)pidl;
+	hr = S_OK;
+
+escapeArea:
+
+	if (data) {
+		CoTaskMemFree(data);
+	}
+
+	if (pps) {
+		pps->Release();
+	}
+
+	return hr;
 }
