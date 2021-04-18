@@ -113,6 +113,8 @@ HRESULT STDMETHODCALLTYPE CNSEFolder::EnumObjectsEx(HWND hwnd, IBindCtx* ctx, DW
 HRESULT STDMETHODCALLTYPE CNSEFolder::GetConditions(PROPERTYKEY* pkey, PVOID iqueryUnit, REFIID riid, PVOID* ppvOut) {
 	//Create simple query
 	LPCWSTR sampleFilter = L"New*.*";
+	//initialize 'ppvOut'.(prevent crash explorer sometime if failed create 'ICondition')
+	*ppvOut = NULL;
 
 	HRESULT hr = _CreateSimpleQuery(sampleFilter, (ICondition**)ppvOut);
 	return hr;
